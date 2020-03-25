@@ -3,7 +3,14 @@
 #include <pthread.h>
 #include <sys/types.h>
 #include <ev.h>
+#include <fcntl.h>
 
+#define MAX_PIPES_PER_STREAM 10
+
+#define CHANNEL_MAINSTREAM 0
+#define CHANNEL_SUBSTREAM 1
+
+// #define ENABLE_DEBUG_LOG
 
 struct ev_loop_struct {
   //the async handlers libev provides to communicate between threads.
@@ -43,26 +50,34 @@ static unsigned long LastMainFrameTime= 0;
 static unsigned long LastSubFrameTime= 0;
 
 static unsigned long StartTime= 0;
-static FILE *pFile = 0;
-static FILE *pFile2 = 0;
 static unsigned long reqTime;
 static unsigned long hdlBuffer;
 
 static char cThreadRunning = 0;
 
+static int mainstreamCounter = 0, substreamCounter = 0;
+static FILE* mainstreamPipes[MAX_PIPES_PER_STREAM];
+static FILE* substreamPipes[MAX_PIPES_PER_STREAM];
+
 void process_video_frame(uint videoChannel,int ptrFrame,int ptrFramePayload,unsigned long frame_size)
 {
+	
+#ifdef ENABLE_DEBUG_LOG
 	printf("got frame %d frame_size=%d\n",videoChannel, frame_size);
-	if(videoChannel == 1){		
-		fwrite(ptrFramePayload,sizeof(char),frame_size,pFile);
-		
-	}else{
-		fwrite(ptrFramePayload,sizeof(char),frame_size,pFile2);
-		
+#endif
+
+	if(videoChannel == 0){
+		for(int i=0; i<mainstreamCounter; i++) {
+			write(mainstreamPipes[i], ptrFramePayload, frame_size*sizeof(char));
+		}
+	}
+	
+	if(videoChannel == 1){
+		for(int i=0; i<substreamCounter; i++) {
+			write(substreamPipes[i], ptrFramePayload, frame_size*sizeof(char));
+		}
 	}
 }
-
-
 
 void ForceKeyFrame(int iParm1)
 
@@ -83,11 +98,15 @@ void ForceKeyFrame(int iParm1)
       }
     }
     if (hdlBuffer == 0) {
+#ifdef ENABLE_DEBUG_LOG		
       printf("shbf msg handle: %d have not been created!\n",iParm1);
+#endif
     }
     else {
       tVar2 = time((time_t *)0x0);
+#ifdef ENABLE_DEBUG_LOG
       printf("ForceKeyFrame msg send, chn: %d, time %d\n",iParm1,tVar2);
+#endif
       iVar1 = hdlBuffer;
       sVar3 = strlen("REQ_IDR");
       shbfev_rcv_send_message(iVar1,"REQ_IDR",sVar3);
@@ -96,9 +115,8 @@ void ForceKeyFrame(int iParm1)
   return;
 }
 
-unsigned long on_recv_video_stream(int *piParm1,int iParm2)
-
-{
+unsigned long on_recv_video_stream(int* piParm1,int iParm2)
+{ 
   int iVar1 	 = 0;
   int iVar2 	 = 0;
   time_t tVar3	 = 0;
@@ -106,15 +124,21 @@ unsigned long on_recv_video_stream(int *piParm1,int iParm2)
   int iSubStream = 0;
   unsigned long uVar5 = 0;
   unsigned long uVar6 = 0;
+#ifdef ENABLE_DEBUG_LOG
   printf("on_recv_video_stream");
+#endif
   if (iParm2 == 0) {
+#ifdef ENABLE_DEBUG_LOG
     printf("on_recv_video_stream err video buf is NULL\n");
+#endif
     uVar5 = 0xffffffff;
   }
   else {
     iVar2 = shbf_get_size(iParm2);
     if (iVar2 + -0x20 < 1) {
+#ifdef ENABLE_DEBUG_LOG
       printf("on_recv_video_stream err, size is zero\n");
+#endif
       shbf_free(iParm2);
       uVar5 = 0;
     }
@@ -134,9 +158,11 @@ unsigned long on_recv_video_stream(int *piParm1,int iParm2)
             uVar6 = *(unsigned long *)(iParm2 + 4);
             VideoMainFrameLostCntr = iVar4;
             tVar3 = time((time_t *)0x0);
+#ifdef ENABLE_DEBUG_LOG
             printf(
                      "main stream frame lost: cur frame no: %d last frame no: %d, main/sub/audiolost cnt: [%d/%d/%d], app run time:[%d]\n"
                      ,uVar6,iVar2,iVar4,iVar1,uVar5,tVar3 - StartTime);
+#endif
             LastMainFrameNo = *(unsigned long *)(iParm2 + 4);
             shbf_free(iParm2);
             return 0xffffffff;
@@ -144,13 +170,17 @@ unsigned long on_recv_video_stream(int *piParm1,int iParm2)
         }
         else {
           if (*(int *)(iParm2 + 0x14) != 1) {
+#ifdef ENABLE_DEBUG_LOG
             printf("main Waitting for next I frame: %d\n",iMainIFrameWaitCounter);
+#endif
             iMainIFrameWaitCounter = iMainIFrameWaitCounter + 1;
             LastMainFrameNo = *(unsigned long *)(iParm2 + 4);
             shbf_free(iParm2);
             return 0;
           }
+#ifdef ENABLE_DEBUG_LOG
           printf("main waiting for I frame fin, wait cnt: %d\n",iMainIFrameWaitCounter);
+#endif
           iMainIFrameWaitCounter = 0;
         }
         LastMainFrameNo = *(int *)(iParm2 + 4);
@@ -171,9 +201,11 @@ unsigned long on_recv_video_stream(int *piParm1,int iParm2)
               uVar6 = *(unsigned long *)(iParm2 + 4);
               VideoSubFrameLostCntr = iVar4;
               tVar3 = time((time_t *)0x0);
+#ifdef ENABLE_DEBUG_LOG
               printf(
                        "sub stream frame lost: cur fream no: %d last frame no: %d, main/sub/audiolost cnt: [%d/%d/%d], app run time: [%d]\n"
                        ,uVar6,iVar2,iVar1,iVar4,uVar5,tVar3 - StartTime);
+#endif
               LastSubFrameNo = *(unsigned long *)(iParm2 + 4);
               shbf_free(iParm2);
               return 0xffffffff;
@@ -181,13 +213,17 @@ unsigned long on_recv_video_stream(int *piParm1,int iParm2)
           }
           else {
             if (*(int *)(iParm2 + 0x14) != 1) {
+#ifdef ENABLE_DEBUG_LOG
               printf("sub Waitting for next I frame: %d\n",iSubFrameWaitCounter);
+#endif
               iSubFrameWaitCounter = iSubFrameWaitCounter + 1;
               LastSubFrameNo = *(unsigned long *)(iParm2 + 4);
               shbf_free(iParm2);
               return 0;
             }
+#ifdef ENABLE_DEBUG_LOG
             printf("sub waiting for I frame fin, wait cnt: %d\n",iSubFrameWaitCounter);
+#endif
             iSubFrameWaitCounter = 0;
           }
           LastSubFrameNo = *(int *)(iParm2 + 4);
@@ -202,14 +238,7 @@ unsigned long on_recv_video_stream(int *piParm1,int iParm2)
   return uVar5;
 }
 
-
-
-
-
-
-
 void on_stream_start(int *piParm1)
-
 {
   int iVar1;
   int iVar2;
@@ -236,15 +265,16 @@ void on_stream_start(int *piParm1)
     iVar2 = DAT_0003d488;
     iVar1 = DAT_0003d484;
     tVar4 = time((time_t *)0x0);
+#ifdef ENABLE_DEBUG_LOG
     printf("stream start: %d,  main/sub/audio stream reconn times:[ %d/%d/%d],  time:%d\n",iVar5,
              iVar1,iVar2,iVar3,tVar4);
+#endif
   }
   DAT_0003d348 = 0;
   return;
 }
 
 void receiver_closed_callback(int *piParm1)
-
 {
   time_t tVar1;
   int local_c;
@@ -267,7 +297,9 @@ void receiver_closed_callback(int *piParm1)
     }
   }
   tVar1 = time((time_t *)0x0);
+#ifdef ENABLE_DEBUG_LOG
   printf("%d receiver closed!time: %d\n",local_c,tVar1);
+#endif
   DAT_0003d348 = 0;
   return;
 }
@@ -281,22 +313,27 @@ void ev_cleanup_func(void)
 }
 
 
-void fetchstream_thread(void)
+void fetchstream_thread()
 
 {
   pthread_t __th = 0;
   struct ev_loop_struct evs = {0,0,0};
   ev_timer local_38 = {0};
   int local_c = 0;
+#ifdef ENABLE_DEBUG_LOG
    printf("start fetchstream_thread\n");
+#endif
   __th = pthread_self();
   pthread_detach(__th);
   
   StartTime = time((time_t *)0x0);
   local_c = prctl(0xf,"getstream",0,0,0);
   if (local_c != 0) {
+#ifdef ENABLE_DEBUG_LOG
     printf("prctl setname failed\n");
+#endif
   }
+
 
   shbf_rcv_global_init();
   ev_loop_Ptr = ev_default_loop(0);
@@ -308,23 +345,31 @@ void fetchstream_thread(void)
 
 
   ev_timer_again(ev_loop_Ptr,&local_38);
+#ifdef ENABLE_DEBUG_LOG
   printf("ev_timer_again"); 
   printf("set ptr");
+#endif
   ptr_process_video_frame = process_video_frame;
+#ifdef ENABLE_DEBUG_LOG
   printf("ptr_process_video_frame");
+#endif
   //ptr_process_audio_frame = process_audio_frame;
   hdl_VideoMainstream = shbfev_rcv_create(ev_loop_Ptr,"/run/video_mainstream");
   shbfev_rcv_event(hdl_VideoMainstream,2,on_recv_video_stream,&var0);
   shbfev_rcv_event(hdl_VideoMainstream,1,receiver_closed_callback,&var0);
   shbfev_rcv_event(hdl_VideoMainstream,0,on_stream_start,&var0);
   shbfev_rcv_start(hdl_VideoMainstream);
+#ifdef ENABLE_DEBUG_LOG
   printf("shbfev_rcv_start(hdl_VideoMainstream)");
+#endif
   hdl_VideoSubstream = shbfev_rcv_create(ev_loop_Ptr,"/run/video_substream");
   shbfev_rcv_event(hdl_VideoSubstream,2,on_recv_video_stream,&var1);
   shbfev_rcv_event(hdl_VideoSubstream,1,receiver_closed_callback,&var1);
   shbfev_rcv_event(hdl_VideoSubstream,0,on_stream_start,&var1);
   shbfev_rcv_start(hdl_VideoSubstream);
+#ifdef ENABLE_DEBUG_LOG
   printf("shbfev_rcv_start hdl_VideoSubstream");
+#endif
   
   //no audio for now
   
@@ -358,6 +403,7 @@ void fetchstream_thread(void)
 
 void sig_handler(int signo)
 {
+#ifdef ENABLE_DEBUG_LOG
     if (signo == SIGUSR1)
         printf("received SIGUSR1\n");
     else if (signo == SIGKILL)
@@ -366,22 +412,61 @@ void sig_handler(int signo)
         printf("received SIGSTOP\n");
     else  if (signo == SIGINT)
         printf("received SIGINT\n");
+#endif
+
     cThreadRunning = 0;
 }
 
+void openPipe(char* path, FILE* pipes[], int channel, int* counter) {
+	FILE* auxFile;
+	auxFile = open(path, O_NONBLOCK | O_RDWR);
+	if(auxFile == NULL) {
+		printf("Can't open pipe '%s'\n", path);
+		return NULL;
+	}
+	
+	pipes[*counter] = auxFile;
+	(*counter)++;
+}
+
+void closePipes(FILE* pipes[], int counter) {
+	for(int i=0; i<counter; i++){
+		fclose(pipes[i]);
+	}
+}
 
 int main(int argc, char** args)
 {
   pthread_t pStack16 = 0;
-  int local_c = 0; 
-  pFile = fopen("mainstream","a");
-  pFile2 = fopen("substream","a");
-  printf("start main\n");
-  local_c = pthread_create(&pStack16,(pthread_attr_t *)0x0,fetchstream_thread,(void *)0x0);  
-  if (local_c != 0) {
-    printf("create_fetchstream_thread ret=%d\n",local_c);
-    exit(-1);
+  int local_c = 0;
+  int opt;
+  
+  while ((opt = getopt (argc, args, "m:s:")) != -1)
+  {
+	  switch(opt) {
+		  case 'm':
+			openPipe(optarg, mainstreamPipes, CHANNEL_MAINSTREAM, &mainstreamCounter);
+		  break;
+		  
+		  case 's':
+			openPipe(optarg, substreamPipes, CHANNEL_SUBSTREAM, &substreamCounter);
+		  break;
+	  }
   }
+  
+#ifdef ENABLE_DEBUG_LOG  
+  printf("start main\n");
+#endif
+
+  local_c = pthread_create(&pStack16,(pthread_attr_t *)0x0,fetchstream_thread, (void *)0x0);
+  
+  if (local_c != 0) {
+#ifdef ENABLE_DEBUG_LOG  
+	printf("create_fetchstream_thread ret=%d\n",local_c);
+#endif
+	exit(-1);
+  }
+  
   if (signal(SIGUSR1, sig_handler) == SIG_ERR)
         printf("\ncan't catch SIGUSR1\n");
     if (signal(SIGKILL, sig_handler) == SIG_ERR)
@@ -395,10 +480,11 @@ int main(int argc, char** args)
   while(cThreadRunning){
      sleep(1);
   }
-  fclose(pFile);
-  fclose(pFile2);
+  
+  closePipes(mainstreamPipes, mainstreamCounter);
+  closePipes(substreamPipes, substreamCounter);
+
+#ifdef ENABLE_DEBUG_LOG
   printf("exit %d",local_c );
+#endif
 }
-
-
-
