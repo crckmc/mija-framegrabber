@@ -4,7 +4,7 @@ STRIP ?= $(CROSS_COMPILE)strip
 
 MI_TOP = $(shell pwd)/../..
 
-C_FLAGS := -w -O2 -march=armv7-a
+C_FLAGS := -w -O2 -march=armv7-a -std=gnu99
 C_FLAGS += -fPIC -DPIC -DOMXILCOMPONENTSPATH=\"/$(BUILD_DIR)\" -DCONFIG_DEBUG_LEVEL=255
 
 OMX_TOP ?= $(shell pwd)
