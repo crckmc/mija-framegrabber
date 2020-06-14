@@ -13,7 +13,7 @@ IPCM_OUT := $(shell pwd)/../../../out
 
 
 
-LDFLAGS := -L$(MI_TOP)/lib -lev -lshbf -lshbfev -lc-2.25 -lpthread-2.25
+LDFLAGS := -L$(MI_TOP)/lib -lev -lshbf -lshbfev -lc-2.28 -lpthread-2.25
 
 C_INCLUDES := \
 	-I$(MI_TOP)/inc \
