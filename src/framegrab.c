@@ -515,7 +515,7 @@ int main(int argc, char** args)
   int local_c = 0;
   int opt;
  
-  while ((opt = getopt (argc, args, "m:s:")) != -1)
+  while ((opt = getopt (argc, args, "m:s:a:")) != -1)
   {
 	  switch(opt) {
 		  case 'm':
